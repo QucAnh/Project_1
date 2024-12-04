@@ -1,0 +1,447 @@
+<!DOCTYPE  html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IndexedDB Manager</title>
+    <style>
+      /* Modern Neumorphic Design */
+      :root {
+        --primary-bg: #e6e7ee;
+        --shadow-light: #ffffff;
+        --shadow-dark: #a3a3a3;
+        --text-color: #2d4247;
+        --success-color: #28a745;
+        --error-color: #dc3545;
+      }
+
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background-color: var(--primary-bg);
+        color: var(--text-color);
+        line-height: 1.6;
+        padding: 20px;
+        margin: 0;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+
+      .card {
+        background: var(--primary-bg);
+        border-radius: 15px;
+        padding: 20px;
+        margin: 20px 0;
+        box-shadow: 8px 8px 16px var(--shadow-dark),
+          -8px -8px 16px var(--shadow-light);
+      }
+
+      .form-group {
+        margin-bottom: 20px;
+      }
+
+      input,
+      button,
+      select,
+      textarea {
+        width: 100%;
+        padding: 12px;
+        margin: 8px 0;
+        border: none;
+        border-radius: 10px;
+        background: var(--primary-bg);
+        box-shadow: inset 5px 5px 10px var(--shadow-dark),
+          inset -5px -5px 10px var(--shadow-light);
+        color: var(--text-color);
+        transition: all 0.3s ease;
+      }
+
+      button {
+        background: var(--primary-bg);
+        box-shadow: 5px 5px 10px var(--shadow-dark),
+          -5px -5px 10px var(--shadow-light);
+        cursor: pointer;
+        font-weight: bold;
+      }
+
+      button:hover {
+        box-shadow: 3px 3px 6px var(--shadow-dark),
+          -3px -3px 6px var(--shadow-light);
+      }
+
+      button:active {
+        box-shadow: inset 5px 5px 10px var(--shadow-dark),
+          inset -5px -5px 10px var(--shadow-light);
+      }
+
+      .status {
+        padding: 10px;
+        margin: 10px 0;
+        border-radius: 8px;
+        text-align: center;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+
+      .success {
+        background-color: var(--success-color);
+        color: white;
+        opacity: 1;
+      }
+
+      .error {
+        background-color: var(--error-color);
+        color: white;
+        opacity: 1;
+      }
+
+      .data-display {
+        margin-top: 20px;
+        overflow-x: auto;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 20px;
+      }
+
+      th,
+      td {
+        padding: 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--shadow-dark);
+      }
+
+      th {
+        background-color: var(--primary-bg);
+        font-weight: bold;
+      }
+
+      .loading {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 3px solid var(--shadow-light);
+        border-radius: 50%;
+        border-top-color: var(--text-color);
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="card">
+        <h2>IndexedDB Data Manager</h2>
+        <div id="status" class="status"></div>
+
+        <div class="form-group">
+          <input type="text" id="nameInput" placeholder="Name" />
+          <input type="email" id="emailInput" placeholder="Email" />
+          <input type="text" id="phoneInput" placeholder="Phone" />
+          <textarea id="notesInput" placeholder="Notes"></textarea>
+          <button onclick="addData()">Add Data</button>
+        </div>
+
+        <div class="form-group">
+          <input type="text" id="searchInput" placeholder="Search by name..." />
+          <button onclick="searchData()">Search</button>
+        </div>
+
+        <div class="data-display">
+          <table id="dataTable">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Notes</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      class IndexedDBManager {
+        constructor() {
+          this.dbName = "MyAppDB";
+          this.dbVersion = 1;
+          this.storeName = "userData";
+          this.db = null;
+          this.initPromise = this.init();
+        }
+
+        // Initialize the database
+        async init() {
+          return new Promise((resolve, reject) => {
+            const request = indexedDB.open(this.dbName, this.dbVersion);
+
+            request.onerror = (event) => {
+              console.error("Database error: ", event.target.error);
+              reject(event.target.error);
+            };
+
+            request.onsuccess = (event) => {
+              this.db = event.target.result;
+              resolve(this.db);
+              displayData();
+            };
+
+            request.onupgradeneeded = (event) => {
+              const db = event.target.result;
+
+              if (!db.objectStoreNames.contains(this.storeName)) {
+                const store = db.createObjectStore(this.storeName, {
+                  keyPath: "id",
+                  autoIncrement: true,
+                });
+
+                // Create indexes
+                store.createIndex("name", "name", { unique: false });
+                store.createIndex("email", "email", { unique: true });
+                store.createIndex("phone", "phone", { unique: false });
+              }
+            };
+          });
+        }
+
+        // Add data to the database
+        async add(data) {
+          if (!this.db) {
+            throw new Error("Database not initialized");
+          }
+          return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(
+              [this.storeName],
+              "readwrite"
+            );
+            const store = transaction.objectStore(this.storeName);
+            const request = store.add(data);
+
+            transaction.onerror = () => reject(transaction.error);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          });
+        }
+
+        // Get all data from the database
+        async getAll() {
+          if (!this.db) {
+            throw new Error("Database not initialized");
+          }
+          return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(
+              [this.storeName],
+              "readonly"
+            );
+            const store = transaction.objectStore(this.storeName);
+            const request = store.getAll();
+
+            transaction.onerror = () => reject(transaction.error);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          });
+        }
+
+        // Search data by name
+        async searchByName(name) {
+          if (!this.db) {
+            throw new Error("Database not initialized");
+          }
+          return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(
+              [this.storeName],
+              "readonly"
+            );
+            const store = transaction.objectStore(this.storeName);
+            const index = store.index("name");
+            const request = index.getAll(
+              IDBKeyRange.bound(name, name + "\uffff")
+            );
+
+            transaction.onerror = () => reject(transaction.error);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          });
+        }
+
+        // Delete data by ID
+        async delete(id) {
+          if (!this.db) {
+            throw new Error("Database not initialized");
+          }
+          return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(
+              [this.storeName],
+              "readwrite"
+            );
+            const store = transaction.objectStore(this.storeName);
+            const request = store.delete(id);
+
+            transaction.onerror = () => reject(transaction.error);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          });
+        }
+
+        // Update data
+        async update(id, data) {
+          return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(
+              [this.storeName],
+              "readwrite"
+            );
+            const store = transaction.objectStore(this.storeName);
+            data.id = id;
+            const request = store.put(data);
+
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          });
+        }
+      }
+
+      // Initialize the database manager
+      const dbManager = new IndexedDBManager();
+
+      // Show status message
+      function showStatus(message, isError = false) {
+        const status = document.getElementById("status");
+        status.textContent = message;
+        status.className = "status " + (isError ? "error" : "success");
+        setTimeout(() => {
+          status.style.opacity = "0";
+        }, 3000);
+      }
+
+      // Add data to the database
+      async function addData() {
+        const name = document.getElementById("nameInput").value;
+        const email = document.getElementById("emailInput").value;
+        const phone = document.getElementById("phoneInput").value;
+        const notes = document.getElementById("notesInput").value;
+
+        if (!name || !email) {
+          showStatus("Name and email are required!", true);
+          return;
+        }
+
+        try {
+          await dbManager.add({ name, email, phone, notes });
+          showStatus("Data added successfully!");
+          clearForm();
+          displayData();
+        } catch (error) {
+          showStatus("Error adding data: " + error, true);
+        }
+      }
+
+      // Clear form inputs
+      function clearForm() {
+        document.getElementById("nameInput").value = "";
+        document.getElementById("emailInput").value = "";
+        document.getElementById("phoneInput").value = "";
+        document.getElementById("notesInput").value = "";
+      }
+
+      // Display data in the table
+      async function displayData() {
+        try {
+          await dbManager.initPromise;
+          const data = await dbManager.getAll();
+          const tableBody = document.getElementById("tableBody");
+          tableBody.innerHTML = "";
+
+          data.forEach((item) => {
+            const row = document.createElement("tr");
+            row.innerHTML = `
+                        <td>${item.name}</td>
+                        <td>${item.email}</td>
+                        <td>${item.phone}</td>
+                        <td>${item.notes}</td>
+                        <td>
+                            <button onclick="deleteData(${item.id})">Delete</button>
+                            <button onclick="editData(${item.id})">Edit</button>
+                        </td>
+                    `;
+            tableBody.appendChild(row);
+          });
+        } catch (error) {
+          showStatus("Error displaying data: " + error, true);
+        }
+      }
+
+      // Search data
+      async function searchData() {
+        const searchTerm = document.getElementById("searchInput").value;
+        try {
+          const results = await dbManager.searchByName(searchTerm);
+          const tableBody = document.getElementById("tableBody");
+          tableBody.innerHTML = "";
+
+          results.forEach((item) => {
+            const row = document.createElement("tr");
+            row.innerHTML = `
+                        <td>${item.name}</td>
+                        <td>${item.email}</td>
+                        <td>${item.phone}</td>
+                        <td>${item.notes}</td>
+                        <td>
+                            <button onclick="deleteData(${item.id})">Delete</button>
+                            <button onclick="editData(${item.id})">Edit</button>
+                        </td>
+                    `;
+            tableBody.appendChild(row);
+          });
+        } catch (error) {
+          showStatus("Error searching data: " + error, true);
+        }
+      }
+      
+      // Delete data
+      async function deleteData(id) {
+        if (confirm("Are you sure you want to delete this entry?")) {
+          try {
+            await dbManager.delete(id);
+            showStatus("Data deleted successfully!");
+            displayData();
+          } catch (error) {
+            showStatus("Error deleting data: " + error, true);
+          }
+        }
+      }
+
+      // Edit data
+      async function editData(id) {
+        // Implementation for editing data
+        // This could open a modal or update the form with the current data
+        showStatus("Edit functionality coming soon!");
+      }
+
+      // Initial display
+      dbManager.initPromise.then(displayData);
+
+      document.addEventListener('DOMContentLoaded', function() {
+        const searchInput = document.getElementById('searchInput');
+        searchInput.addEventListener('keypress', function(event) {
+          if (event.key === 'Enter') {
+            searchData();  // Call the search function when Enter is pressed
+          }
+        });
+      });
+    </script>
+  </body>
+</html>
